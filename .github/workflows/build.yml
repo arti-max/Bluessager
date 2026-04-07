@@ -24,7 +24,15 @@ jobs:
       - name: Generate Android project
         run: flutter create .
         
-      # 2. ОГРАНИЧИВАЕМ ПАМЯТЬ ДЛЯ GRADLE (Чтобы билд не падал)
+      # 2. ПОНИЖАЕМ ВЕРСИЮ СБОРЩИКА (Чтобы старые библиотеки вроде nearby_connections работали)
+      - name: Downgrade Android Gradle Plugin
+        run: |
+          sed -i "s/id 'com.android.application' version '8.1.0'/id 'com.android.application' version '7.4.2'/g" android/settings.gradle.kts || true
+          sed -i "s/id 'com.android.library' version '8.1.0'/id 'com.android.library' version '7.4.2'/g" android/settings.gradle.kts || true
+          # На всякий случай дублируем для старых версий flutter create
+          sed -i "s/com.android.tools.build:gradle:8.*/com.android.tools.build:gradle:7.4.2/g" android/build.gradle || true
+        
+      # 3. ОГРАНИЧИВАЕМ ПАМЯТЬ ДЛЯ GRADLE
       - name: Configure Gradle Memory
         run: |
           mkdir -p android
@@ -32,12 +40,11 @@ jobs:
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
         
-      # 3. Добавляем разрешения для Bluetooth и Wi-Fi
+      # 4. Добавляем разрешения
       - name: Add Android Permissions
         run: |
           sed -i '/<manifest/a \    <uses-permission android:name="android.permission.BLUETOOTH" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />\n    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />\n    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />' android/app/src/main/AndroidManifest.xml
           
-      # 4. Обновили actions/cache до v4 (чтобы не ругался на Node 20)
       - name: Cache pub dependencies
         uses: actions/cache@v4
         with:
@@ -47,8 +54,6 @@ jobs:
             ${{ runner.os }}-pub-
           
       - run: flutter pub get
-      
-      # 5. Собираем APK
       - run: flutter build apk --release
       
       - name: Upload APK
