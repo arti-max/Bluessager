@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Для работы с буфером обмена
+import '../logic/app_state.dart';       // Подключаем логику
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -8,71 +10,80 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // Переменные для хранения состояния
-  bool _isGatewayEnabled = true;
-  bool _isMaskingEnabled = false;
-  final String _myUid = "MESH-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}"; // Генерируем фейковый UID
+  late TextEditingController _nameController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: appState.name);
+  }
+
+  void _saveProfile() {
+    setState(() {
+      appState.name = _nameController.text;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Настройки сохранены')));
+    Navigator.pop(context);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Профиль и Настройки')),
-      body: SingleChildScrollView( // Добавили скролл, чтобы не было ошибок на маленьких экранах
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
             const CircleAvatar(radius: 50, child: Icon(Icons.person, size: 50)),
             const SizedBox(height: 16),
             
-            // Отображение UID
+            // Копирование UID
             Card(
               color: Colors.deepPurple.withOpacity(0.2),
               child: ListTile(
                 title: const Text('Ваш уникальный UID'),
-                subtitle: Text(_myUid, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurpleAccent)),
+                subtitle: Text(appState.uid, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurpleAccent)),
                 trailing: IconButton(
                   icon: const Icon(Icons.copy),
                   onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('UID скопирован!')));
+                    Clipboard.setData(ClipboardData(text: appState.uid)); // Копируем в буфер
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('UID скопирован в буфер обмена!')));
                   },
                 ),
               ),
             ),
             const SizedBox(height: 16),
             
-            const TextField(
-              decoration: InputDecoration(
-                labelText: 'Ваше имя (визитка для P2P)',
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(
+                labelText: 'Ваше имя',
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 24),
             
-            // Рабочие переключатели
             SwitchListTile(
               title: const Text('Режим Mesh-шлюза'),
               subtitle: const Text('Раздавать интернет устройствам по Bluetooth/Wi-Fi'),
-              value: _isGatewayEnabled,
+              value: appState.isGatewayEnabled,
               onChanged: (val) {
-                setState(() => _isGatewayEnabled = val);
+                setState(() => appState.isGatewayEnabled = val);
               },
             ),
             SwitchListTile(
               title: const Text('Маскировка пакетов (ТСПУ)'),
-              subtitle: const Text('Заворачивать трафик в HTTPS (zapret API)'),
-              value: _isMaskingEnabled,
+              subtitle: const Text('Заворачивать трафик в HTTPS'),
+              value: appState.isMaskingEnabled,
               onChanged: (val) {
-                setState(() => _isMaskingEnabled = val);
+                setState(() => appState.isMaskingEnabled = val);
               },
             ),
             const SizedBox(height: 40),
             
             ElevatedButton(
               style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Настройки сохранены')));
-                Navigator.pop(context);
-              },
+              onPressed: _saveProfile,
               child: const Text('Сохранить'),
             )
           ],

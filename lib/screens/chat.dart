@@ -10,7 +10,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
-  final List<String> _messages = ["Привет! Я в зоне видимости."];
+  final List<String> _messages = ["Соединение установлено."];
 
   void _sendMessage() {
     if (_controller.text.isEmpty) return;
@@ -18,6 +18,35 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages.add(_controller.text);
       _controller.clear();
     });
+  }
+
+  // Шторка прикрепления файлов
+  void _showAttachmentMenu() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image, color: Colors.blue),
+              title: const Text('Фото и Видео'),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.insert_drive_file, color: Colors.orange),
+              title: const Text('Файл (до 1 ГБ)'),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.mic, color: Colors.green),
+              title: const Text('Голосовое сообщение'),
+              onTap: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -31,7 +60,7 @@ class _ChatScreenState extends State<ChatScreen> {
               padding: const EdgeInsets.all(8),
               itemCount: _messages.length,
               itemBuilder: (context, index) {
-                bool isMe = index > 0; // Для примера
+                bool isMe = index > 0; 
                 return Align(
                   alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
@@ -51,13 +80,17 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
-                IconButton(icon: const Icon(Icons.attach_file), onPressed: () {}),
+                IconButton(
+                  icon: const Icon(Icons.attach_file), 
+                  onPressed: _showAttachmentMenu, // Привязали функцию
+                ),
                 Expanded(
                   child: TextField(
                     controller: _controller,
                     decoration: const InputDecoration(
-                      hintText: 'Введите сообщение...',
+                      hintText: 'Сообщение...',
                       border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(20))),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     ),
                   ),
                 ),
