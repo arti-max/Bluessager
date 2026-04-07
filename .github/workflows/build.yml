@@ -48,8 +48,12 @@ jobs:
       # ИСПРАВЛЕНИЕ: Добавлены maxSdkVersion и minSdkVersion для совместимости с Android 12
       - name: Add Android Permissions
         run: |
+          # 1. Сначала аккуратно добавляем пространство имен tools прямо внутрь тега <manifest>
+          sed -i 's/<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android">/<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android" xmlns:tools="http:\/\/schemas.android.com\/tools">/g' android/app/src/main/AndroidManifest.xml
+          
+          # 2. Создаем чистый список разрешений
           cat << 'EOF' > perms.txt
-              <!-- Указываем инструменты слияния манифестов -->
+              <!-- Старые права (до Android 11) -->
               <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
               <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
               
@@ -62,11 +66,8 @@ jobs:
               <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
           EOF
           
-          # 1. Добавляем пространство имен tools, чтобы можно было решать конфликты
-          sed -i 's/<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android">/<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android"\n    xmlns:tools="http:\/\/schemas.android.com\/tools">/g' android/app/src/main/AndroidManifest.xml
-          
-          # 2. Вставляем наши права
-          sed -i '/<manifest/r perms.txt' android/app/src/main/AndroidManifest.xml
+          # 3. Вставляем их сразу после открытия тега <manifest>
+          sed -i '/<manifest.*>/r perms.txt' android/app/src/main/AndroidManifest.xml
           
       - name: Cache pub dependencies
         uses: actions/cache@v4
