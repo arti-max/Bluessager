@@ -10,28 +10,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      # 1. Настройка Java (без кэша gradle, так как папки android еще нет)
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
       
-      # 2. Настройка Flutter
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
           
-      # 3. Генерируем папку android и нужные файлы в облаке
+      # 1. Генерируем проект
       - name: Generate Android project
         run: flutter create .
         
-      # 4. Добавляем разрешения для Bluetooth, Wi-Fi и Геолокации
+      # 2. ОГРАНИЧИВАЕМ ПАМЯТЬ ДЛЯ GRADLE (Чтобы билд не падал)
+      - name: Configure Gradle Memory
+        run: |
+          mkdir -p android
+          echo "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" > android/gradle.properties
+          echo "android.useAndroidX=true" >> android/gradle.properties
+          echo "android.enableJetifier=true" >> android/gradle.properties
+        
+      # 3. Добавляем разрешения для Bluetooth и Wi-Fi
       - name: Add Android Permissions
         run: |
           sed -i '/<manifest/a \    <uses-permission android:name="android.permission.BLUETOOTH" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />\n    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />\n    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />' android/app/src/main/AndroidManifest.xml
           
-      # 5. Кэширование библиотек
+      # 4. Обновили actions/cache до v4 (чтобы не ругался на Node 20)
       - name: Cache pub dependencies
         uses: actions/cache@v4
         with:
@@ -40,11 +46,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pub-
           
-      # 6. Сборка проекта
       - run: flutter pub get
+      
+      # 5. Собираем APK
       - run: flutter build apk --release
       
-      # 7. Загрузка готового APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
