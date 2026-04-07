@@ -7,7 +7,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  nearby_connections: ^3.3.1 # Библиотека для P2P (Bluetooth + WiFi)
+  nearby_connections: ^4.3.0 # Библиотека для P2P (Bluetooth + WiFi)
   permission_handler: ^11.3.0 # Для запроса прав на Bluetooth и Геолокацию
   shared_preferences: ^2.2.2  # Для локального кэша настроек
 

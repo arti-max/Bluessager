@@ -4,6 +4,9 @@ on:
   push:
     branches: [ "main" ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,19 +23,9 @@ jobs:
           channel: 'stable'
           cache: true
           
-      # 1. Генерируем проект
       - name: Generate Android project
         run: flutter create .
         
-      # 2. ПОНИЖАЕМ ВЕРСИЮ СБОРЩИКА (Чтобы старые библиотеки вроде nearby_connections работали)
-      - name: Downgrade Android Gradle Plugin
-        run: |
-          sed -i "s/id 'com.android.application' version '8.1.0'/id 'com.android.application' version '7.4.2'/g" android/settings.gradle.kts || true
-          sed -i "s/id 'com.android.library' version '8.1.0'/id 'com.android.library' version '7.4.2'/g" android/settings.gradle.kts || true
-          # На всякий случай дублируем для старых версий flutter create
-          sed -i "s/com.android.tools.build:gradle:8.*/com.android.tools.build:gradle:7.4.2/g" android/build.gradle || true
-        
-      # 3. ОГРАНИЧИВАЕМ ПАМЯТЬ ДЛЯ GRADLE
       - name: Configure Gradle Memory
         run: |
           mkdir -p android
@@ -40,7 +33,6 @@ jobs:
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
         
-      # 4. Добавляем разрешения
       - name: Add Android Permissions
         run: |
           sed -i '/<manifest/a \    <uses-permission android:name="android.permission.BLUETOOTH" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />\n    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />\n    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />' android/app/src/main/AndroidManifest.xml
@@ -54,6 +46,7 @@ jobs:
             ${{ runner.os }}-pub-
           
       - run: flutter pub get
+      
       - run: flutter build apk --release
       
       - name: Upload APK
