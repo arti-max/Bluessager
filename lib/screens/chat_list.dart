@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../logic/app_state.dart';
+import '../logic/mesh_service.dart'; // Подключаем наш движок P2P
 import 'chat.dart';
 import 'profile.dart';
 
@@ -12,15 +13,23 @@ class ChatListScreen extends StatefulWidget {
 
 class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  
+  // Список реально найденных устройств рядом (вместо заглушек)
+  List<Map<String, String>> _nearbyDevices = [];
+  bool _isSearching = false;
 
   @override
   void initState() {
     super.initState();
-    // Контроллер для отслеживания текущей вкладки
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
-      setState(() {}); // Перерисовываем интерфейс при смене вкладки, чтобы обновить кнопку (FAB)
+      setState(() {});
     });
+
+    // Если включен режим шлюза в профиле, сразу начинаем раздачу себя (Advertising)
+    if (appState.isGatewayEnabled) {
+      meshService.startAdvertising();
+    }
   }
 
   @override
@@ -29,7 +38,47 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
     super.dispose();
   }
 
-  // --- ДИАЛОГИ ---
+  // --- ЛОГИКА P2P (Радар) ---
+  void _toggleSearch() async {
+    if (_isSearching) {
+      // TODO: Добавить остановку поиска в MeshService
+      setState(() => _isSearching = false);
+      return;
+    }
+
+    setState(() => _isSearching = true);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Запрос разрешений и запуск радара...')));
+
+    // Запускаем реальный поиск устройств!
+    await meshService.startDiscovery((endpointId, endpointName) {
+      // Эта функция вызовется, когда телефон найдет кого-то рядом
+      setState(() {
+        // Проверяем, нет ли уже этого устройства в списке
+        if (!_nearbyDevices.any((d) => d['id'] == endpointId)) {
+          _nearbyDevices.add({
+            'id': endpointId,
+            'name': endpointName,
+          });
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Найден: $endpointName')));
+    });
+  }
+
+  // Подключение к найденному устройству
+  void _connectToPeer(String endpointId, String peerName) async {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Подключение к $peerName...')));
+    await meshService.connectToDevice(endpointId);
+    
+    // Переходим в чат (в будущем переход должен происходить только после успешного статуса CONNECTED)
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ChatScreen(peerName: peerName)),
+    );
+  }
+
+  // --- ДИАЛОГИ (Без изменений) ---
   void _showAddFriendDialog() {
     final TextEditingController uidController = TextEditingController();
     showDialog(
@@ -82,69 +131,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
     );
   }
 
-  // Меню по долгому нажатию на группу
-  void _showGroupOptionsMenu(int index) {
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit),
-              title: const Text('Изменить название'),
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Тут будет переименование')));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('Настройки группы'),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('Покинуть группу', style: TextStyle(color: Colors.red)),
-              onTap: () {
-                setState(() => appState.groups.removeAt(index));
-                Navigator.pop(context);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Меню по долгому нажатию на друга
-  void _showFriendOptionsMenu(int index) {
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit),
-              title: const Text('Задать локальное имя'),
-              onTap: () {
-                Navigator.pop(context);
-                // Тут в будущем будет диалог смены локального имени
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('Удалить из друзей', style: TextStyle(color: Colors.red)),
-              onTap: () {
-                setState(() => appState.friends.removeAt(index));
-                Navigator.pop(context);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -154,10 +140,13 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
           IconButton(
             icon: const Icon(Icons.account_circle),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()))
-                .then((_) => setState(() {})),
+                .then((_) {
+                  // Если после изменения профиля включили шлюз — начинаем раздачу
+                  if (appState.isGatewayEnabled) meshService.startAdvertising();
+                  setState(() {});
+                }),
           ),
         ],
-        // Убрали isScrollable: true, теперь вкладки будут строго по центру
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
@@ -170,17 +159,33 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
       body: TabBarView(
         controller: _tabController,
         children: [
-          // Вкладка 1: Рядом (Радар)
-          ListView.builder(
-            itemCount: 2,
-            itemBuilder: (context, index) => ListTile(
-              leading: const CircleAvatar(backgroundColor: Colors.green, child: Icon(Icons.bluetooth, color: Colors.white)),
-              title: Text('Неизвестное устройство #${index + 1}'),
-              // Если нашли устройство рядом, мы сразу видим его UID и статус
-              subtitle: const Text('MESH-59281 • Сигнал: Отличный'), 
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(peerName: 'Устройство #${index + 1}'))),
-            ),
-          ),
+          // Вкладка 1: Реальный Радар
+          _nearbyDevices.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.radar, size: 80, color: _isSearching ? Colors.green : Colors.grey),
+                      const SizedBox(height: 16),
+                      Text(
+                        _isSearching ? 'Ищем устройства вокруг...' : 'Нажмите кнопку поиска, чтобы найти устройства рядом',
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: _nearbyDevices.length,
+                  itemBuilder: (context, index) {
+                    var device = _nearbyDevices[index];
+                    return ListTile(
+                      leading: const CircleAvatar(backgroundColor: Colors.green, child: Icon(Icons.bluetooth, color: Colors.white)),
+                      title: Text(device['name'] ?? 'Неизвестно'),
+                      subtitle: Text('${device['id']} • Нажми для подключения'), 
+                      onTap: () => _connectToPeer(device['id']!, device['name']!),
+                    );
+                  },
+                ),
           
           // Вкладка 2: Друзья
           ListView.builder(
@@ -188,15 +193,11 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
             itemBuilder: (context, index) {
               var friend = appState.friends[index];
               bool hasName = friend['name'].toString().isNotEmpty;
-
               return ListTile(
                 leading: const CircleAvatar(backgroundColor: Colors.blueAccent, child: Icon(Icons.person, color: Colors.white)),
-                // Логика: Если есть имя — показываем имя, если нет — UID
                 title: Text(hasName ? friend['name'] : friend['uid']),
-                // Логика: Если есть имя, то UID показываем серым внизу
                 subtitle: hasName ? Text(friend['uid'], style: const TextStyle(color: Colors.grey)) : const Text('Офлайн'),
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(peerName: hasName ? friend['name'] : friend['uid']))),
-                onLongPress: () => _showFriendOptionsMenu(index), // Контекстное меню
               );
             },
           ),
@@ -209,27 +210,27 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
               title: Text(appState.groups[index]['name']),
               subtitle: Text('${appState.groups[index]['members']} участников'),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(peerName: appState.groups[index]['name']))),
-              onLongPress: () => _showGroupOptionsMenu(index), // Контекстное меню
             ),
           ),
         ],
       ),
       
-      // Умная плавающая кнопка (зависит от открытой вкладки)
+      // Умная кнопка
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           if (_tabController.index == 0) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Поиск новых устройств...')));
+            _toggleSearch(); // Вызов реального поиска!
           } else if (_tabController.index == 1) {
             _showAddFriendDialog();
           } else if (_tabController.index == 2) {
             _showCreateGroupDialog();
           }
         },
+        backgroundColor: _tabController.index == 0 && _isSearching ? Colors.green : null,
         child: Icon(
-          _tabController.index == 0 ? Icons.radar :
-          _tabController.index == 1 ? Icons.person_add :
-          Icons.group_add,
+          _tabController.index == 0 
+              ? (_isSearching ? Icons.stop : Icons.radar) 
+              : _tabController.index == 1 ? Icons.person_add : Icons.group_add,
         ),
       ),
     );
