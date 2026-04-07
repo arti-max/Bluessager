@@ -49,20 +49,23 @@ jobs:
       - name: Add Android Permissions
         run: |
           cat << 'EOF' > perms.txt
-              <!-- Старые права (только до Android 11 включительно) -->
+              <!-- Указываем инструменты слияния манифестов -->
               <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
               <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-              <!-- Новые права (для Android 12 и выше) -->
-              <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" android:minSdkVersion="31" />
-              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:minSdkVersion="31" />
-              <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:minSdkVersion="31" />
-              <!-- Локация и Wi-Fi -->
-              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-              <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+              
+              <!-- Локация (Критично для Android 12) -->
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-              <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:minSdkVersion="33" />
+              
+              <!-- Wi-Fi -->
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+              <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
           EOF
+          
+          # 1. Добавляем пространство имен tools, чтобы можно было решать конфликты
+          sed -i 's/<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android">/<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android"\n    xmlns:tools="http:\/\/schemas.android.com\/tools">/g' android/app/src/main/AndroidManifest.xml
+          
+          # 2. Вставляем наши права
           sed -i '/<manifest/r perms.txt' android/app/src/main/AndroidManifest.xml
           
       - name: Cache pub dependencies
