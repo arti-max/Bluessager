@@ -11,8 +11,9 @@ class MeshService {
   final Strategy strategy = Strategy.P2P_CLUSTER;
   final String serviceId = "com.bluessager.mesh";
 
-  // Запрос разрешений у системы
+  // --- УЛУЧШЕННЫЙ ЗАПРОС РАЗРЕШЕНИЙ ---
   Future<bool> requestPermissions() async {
+    // 1. Сначала запрашиваем через стандартный пакет
     Map<Permission, PermissionStatus> statuses = await [
       Permission.bluetooth,
       Permission.bluetoothAdvertise,
@@ -22,16 +23,40 @@ class MeshService {
       Permission.nearbyWifiDevices,
     ].request();
 
-    return statuses.values.every((status) => status.isGranted);
+    bool allGranted = statuses.values.every((status) => status.isGranted);
+
+    // 2. Обязательно проверяем, включен ли вообще ползунок геолокации в телефоне!
+    bool locationEnabled = await Nearby().checkLocationEnabled();
+    if (!locationEnabled) {
+      print("ОШИБКА: Геолокация ВЫКЛЮЧЕНА в шторке телефона!");
+      return false;
+    }
+
+    // 3. Используем встроенные методы библиотеки для уверенности
+    bool hasLocationPerm = await Nearby().checkLocationPermission();
+    if (!hasLocationPerm) {
+      await Nearby().askLocationPermission();
+    }
+
+    // Проверка разрешений для Bluetooth (только Android 12+)
+    bool hasBluetoothPerm = await Nearby().checkBluetoothPermission();
+    if (!hasBluetoothPerm) {
+      Nearby().askBluetoothPermission();
+    }
+
+    return allGranted && locationEnabled;
   }
 
-  // 1. НАЧАТЬ РАЗДАЧУ
-  Future<void> startAdvertising() async {
+  // --- 1. НАЧАТЬ РАЗДАЧУ ---
+  Future<bool> startAdvertising() async {
     bool hasPermissions = await requestPermissions();
-    if (!hasPermissions) return;
+    if (!hasPermissions) {
+      print("Нет прав для старта раздачи");
+      return false;
+    }
 
     try {
-      await Nearby().startAdvertising(
+      bool result = await Nearby().startAdvertising(
         appState.name.isEmpty ? appState.uid : appState.name,
         strategy,
         onConnectionInitiated: (String? endpointId, ConnectionInfo info) {
@@ -50,28 +75,31 @@ class MeshService {
           );
         },
         onConnectionResult: (String? endpointId, Status status) {
-          if (status == Status.CONNECTED) {
-            print("УСПЕШНО ПОДКЛЮЧЕНО К $endpointId");
-          }
+          print("Результат подключения: $status");
         },
         onDisconnected: (String? endpointId) {
           print("ОТКЛЮЧЕНО: $endpointId");
         },
         serviceId: serviceId,
       );
-      print("Раздача начата!");
+      print("Старт раздачи: УСПЕХ = $result");
+      return result;
     } catch (e) {
-      print("Ошибка раздачи: $e");
+      print("Ошибка старта раздачи: $e");
+      return false;
     }
   }
 
-  // 2. ИСКАТЬ ДРУГИХ (Радар)
-  Future<void> startDiscovery(Function(String, String) onDeviceFound) async {
+  // --- 2. ИСКАТЬ ДРУГИХ ---
+  Future<bool> startDiscovery(Function(String, String) onDeviceFound) async {
     bool hasPermissions = await requestPermissions();
-    if (!hasPermissions) return;
+    if (!hasPermissions) {
+      print("Нет прав для старта поиска");
+      return false;
+    }
 
     try {
-      await Nearby().startDiscovery(
+      bool result = await Nearby().startDiscovery(
         appState.name.isEmpty ? appState.uid : appState.name,
         strategy,
         onEndpointFound: (String? endpointId, String? endpointName, String? serviceId) {
@@ -79,18 +107,20 @@ class MeshService {
           print("Найден: $endpointName ($endpointId)");
           onDeviceFound(endpointId, endpointName);
         },
-        onEndpointLost: (String? endpointId) { // ИСПРАВЛЕНА ОШИБКА ЗДЕСЬ (добавлен знак вопроса)
+        onEndpointLost: (String? endpointId) {
           print("Потерян: $endpointId");
         },
         serviceId: serviceId,
       );
-      print("Поиск начат!");
+      print("Старт поиска: УСПЕХ = $result");
+      return result;
     } catch (e) {
-      print("Ошибка поиска: $e");
+      print("Ошибка старта поиска: $e");
+      return false;
     }
   }
 
-  // 3. ПОДКЛЮЧИТЬСЯ К НАЙДЕННОМУ
+  // --- 3. ПОДКЛЮЧЕНИЕ ---
   Future<void> connectToDevice(String endpointId) async {
     try {
       await Nearby().requestConnection(
@@ -114,17 +144,13 @@ class MeshService {
     }
   }
 
-  // 4. ОТПРАВИТЬ СООБЩЕНИЕ
   void sendMessage(String endpointId, String message) {
-    Nearby().sendBytesPayload(
-      endpointId, 
-      Uint8List.fromList(message.codeUnits)
-    );
+    Nearby().sendBytesPayload(endpointId, Uint8List.fromList(message.codeUnits));
   }
 
   void stopDiscoveryOnly() {
     Nearby().stopDiscovery();
-    print("Поиск остановлен, но маяк продолжает работать");
+    print("Поиск остановлен");
   }
 
   void stopMesh() {

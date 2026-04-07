@@ -35,8 +35,7 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
   // --- ЛОГИКА P2P (ТОЛЬКО ПОИСК) ---
   void _toggleSearch() async {
     if (_isSearching) {
-      // Останавливаем ТОЛЬКО поиск (не трогаем раздачу, она работает всегда)
-      meshService.stopDiscoveryOnly(); // Сейчас мы добавим этот метод в mesh_service
+      meshService.stopDiscoveryOnly(); 
       setState(() {
         _isSearching = false;
         _nearbyDevices.clear(); 
@@ -45,10 +44,10 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
     }
 
     setState(() => _isSearching = true);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Поиск устройств вокруг...')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Запуск радара...')));
 
-    // Начинаем искать других
-    await meshService.startDiscovery((endpointId, endpointName) {
+    // Сохраняем результат запуска поиска
+    bool isSuccess = await meshService.startDiscovery((endpointId, endpointName) {
       setState(() {
         if (!_nearbyDevices.any((d) => d['id'] == endpointId)) {
           _nearbyDevices.add({
@@ -57,7 +56,22 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
           });
         }
       });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Найден: $endpointName')));
     });
+
+    // Если запуск не удался (нет прав или выключена геолокация)
+    if (!isSuccess) {
+      setState(() => _isSearching = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ошибка запуска! Включите Локацию (GPS) в шторке телефона и дайте все права.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+          )
+        );
+      }
+    }
   }
 
   void _connectToPeer(String endpointId, String peerName) async {
