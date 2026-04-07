@@ -1,12 +1,15 @@
 name: bluessager
 description: A new Flutter project.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+2
 environment:
   sdk: '>=3.0.0 <4.0.0'
 dependencies:
   flutter:
     sdk: flutter
+  nearby_connections: ^3.3.1 # Библиотека для P2P (Bluetooth + WiFi)
+  permission_handler: ^11.3.0 # Для запроса прав на Bluetooth и Геолокацию
+  shared_preferences: ^2.2.2  # Для локального кэша настроек
 
 flutter:
   uses-material-design: true

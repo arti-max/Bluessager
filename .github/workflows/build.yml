@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      # 1. Настройка Java (пока без кеша gradle, так как папки android еще нет)
+      # 1. Настройка Java (без кэша gradle, так как папки android еще нет)
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -22,11 +22,16 @@ jobs:
           channel: 'stable'
           cache: true
           
-      # 3. САМОЕ ГЛАВНОЕ: Генерируем папку android и нужные файлы в облаке
+      # 3. Генерируем папку android и нужные файлы в облаке
       - name: Generate Android project
         run: flutter create .
+        
+      # 4. Добавляем разрешения для Bluetooth, Wi-Fi и Геолокации
+      - name: Add Android Permissions
+        run: |
+          sed -i '/<manifest/a \    <uses-permission android:name="android.permission.BLUETOOTH" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />\n    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />\n    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />' android/app/src/main/AndroidManifest.xml
           
-      # 4. Кеширование библиотек
+      # 5. Кэширование библиотек
       - name: Cache pub dependencies
         uses: actions/cache@v4
         with:
@@ -35,9 +40,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pub-
           
+      # 6. Сборка проекта
       - run: flutter pub get
       - run: flutter build apk --release
       
+      # 7. Загрузка готового APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
