@@ -11,19 +11,17 @@ class MeshService {
   final Strategy strategy = Strategy.P2P_CLUSTER;
   final String serviceId = "com.bluessager.mesh";
 
-  // --- УЛУЧШЕННЫЙ ЗАПРОС РАЗРЕШЕНИЙ (БЕЗ УСТАРЕВШИХ МЕТОДОВ) ---
+  // --- ЖЕЛЕЗОБЕТОННЫЙ ЗАПРОС РАЗРЕШЕНИЙ (ИСПРАВЛЕННЫЙ ДЛЯ ANDROID 12) ---
   Future<bool> requestPermissions() async {
-    // 1. Проверяем, включен ли ползунок GPS (локации) в телефоне
-    // В Android без GPS нельзя сканировать Bluetooth LE
-    ServiceStatus locationServiceStatus = await Permission.location.serviceStatus;
-    if (locationServiceStatus != ServiceStatus.enabled) {
-      print("ОШИБКА: Геолокация (GPS) ВЫКЛЮЧЕНА в шторке телефона!");
+    // 1. Сначала принудительно запрашиваем точную локацию (Критично для Android 12)
+    PermissionStatus locationStatus = await Permission.locationWhenInUse.request();
+    if (!locationStatus.isGranted) {
+      print("ОШИБКА: Пользователь отказал в доступе к локации");
       return false;
     }
 
-    // 2. Запрашиваем все нужные права (локация, блютуз, wifi)
+    // 2. Затем запрашиваем все Bluetooth и Wi-Fi права
     Map<Permission, PermissionStatus> statuses = await [
-      Permission.location,
       Permission.bluetooth,
       Permission.bluetoothAdvertise,
       Permission.bluetoothConnect,
@@ -31,28 +29,23 @@ class MeshService {
       Permission.nearbyWifiDevices,
     ].request();
 
-    // 3. Проверяем, что нам дали хотя бы базовые права
-    bool isLocationGranted = statuses[Permission.location]?.isGranted ?? false;
-    bool isBluetoothGranted = statuses[Permission.bluetooth]?.isGranted ?? false;
-
-    // В Android 12+ нужны специфичные права
-    bool isBluetoothConnectGranted = statuses[Permission.bluetoothConnect]?.isGranted ?? true;
-    bool isBluetoothScanGranted = statuses[Permission.bluetoothScan]?.isGranted ?? true;
-    bool isBluetoothAdvertiseGranted = statuses[Permission.bluetoothAdvertise]?.isGranted ?? true;
-    bool isWifiGranted = statuses[Permission.nearbyWifiDevices]?.isGranted ?? true;
-
-    bool allGranted = isLocationGranted && 
-                      isBluetoothGranted && 
-                      isBluetoothConnectGranted && 
-                      isBluetoothScanGranted && 
-                      isBluetoothAdvertiseGranted && 
-                      isWifiGranted;
-
-    if (!allGranted) {
-      print("ОШИБКА: Вы не выдали приложению все необходимые разрешения!");
+    // 3. Анализируем ответы без жесткой привязки ко всем сразу
+    bool hasBasicBluetooth = statuses[Permission.bluetooth]?.isGranted == true;
+    
+    // Новые блютуз-права (появились в Android 12)
+    bool hasNewBluetooth = (statuses[Permission.bluetoothConnect]?.isGranted == true) && 
+                           (statuses[Permission.bluetoothScan]?.isGranted == true) &&
+                           (statuses[Permission.bluetoothAdvertise]?.isGranted == true);
+    
+    // Если нам дали ЛИБО старый блютуз (Android 11 и ниже), ЛИБО новый блютуз (Android 12 и выше)
+    if (hasBasicBluetooth || hasNewBluetooth) {
+      return true;
+    } else {
+      print("ОШИБКА РАЗРЕШЕНИЙ BLUETOOTH");
+      print("Basic BT: $hasBasicBluetooth");
+      print("New BT: $hasNewBluetooth");
+      return false;
     }
-
-    return allGranted;
   }
 
   // --- 1. НАЧАТЬ РАЗДАЧУ ---
