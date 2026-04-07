@@ -11,40 +11,48 @@ class MeshService {
   final Strategy strategy = Strategy.P2P_CLUSTER;
   final String serviceId = "com.bluessager.mesh";
 
-  // --- УЛУЧШЕННЫЙ ЗАПРОС РАЗРЕШЕНИЙ ---
+  // --- УЛУЧШЕННЫЙ ЗАПРОС РАЗРЕШЕНИЙ (БЕЗ УСТАРЕВШИХ МЕТОДОВ) ---
   Future<bool> requestPermissions() async {
-    // 1. Сначала запрашиваем через стандартный пакет
+    // 1. Проверяем, включен ли ползунок GPS (локации) в телефоне
+    // В Android без GPS нельзя сканировать Bluetooth LE
+    ServiceStatus locationServiceStatus = await Permission.location.serviceStatus;
+    if (locationServiceStatus != ServiceStatus.enabled) {
+      print("ОШИБКА: Геолокация (GPS) ВЫКЛЮЧЕНА в шторке телефона!");
+      return false;
+    }
+
+    // 2. Запрашиваем все нужные права (локация, блютуз, wifi)
     Map<Permission, PermissionStatus> statuses = await [
+      Permission.location,
       Permission.bluetooth,
       Permission.bluetoothAdvertise,
       Permission.bluetoothConnect,
       Permission.bluetoothScan,
-      Permission.location,
       Permission.nearbyWifiDevices,
     ].request();
 
-    bool allGranted = statuses.values.every((status) => status.isGranted);
+    // 3. Проверяем, что нам дали хотя бы базовые права
+    bool isLocationGranted = statuses[Permission.location]?.isGranted ?? false;
+    bool isBluetoothGranted = statuses[Permission.bluetooth]?.isGranted ?? false;
 
-    // 2. Обязательно проверяем, включен ли вообще ползунок геолокации в телефоне!
-    bool locationEnabled = await Nearby().checkLocationEnabled();
-    if (!locationEnabled) {
-      print("ОШИБКА: Геолокация ВЫКЛЮЧЕНА в шторке телефона!");
-      return false;
+    // В Android 12+ нужны специфичные права
+    bool isBluetoothConnectGranted = statuses[Permission.bluetoothConnect]?.isGranted ?? true;
+    bool isBluetoothScanGranted = statuses[Permission.bluetoothScan]?.isGranted ?? true;
+    bool isBluetoothAdvertiseGranted = statuses[Permission.bluetoothAdvertise]?.isGranted ?? true;
+    bool isWifiGranted = statuses[Permission.nearbyWifiDevices]?.isGranted ?? true;
+
+    bool allGranted = isLocationGranted && 
+                      isBluetoothGranted && 
+                      isBluetoothConnectGranted && 
+                      isBluetoothScanGranted && 
+                      isBluetoothAdvertiseGranted && 
+                      isWifiGranted;
+
+    if (!allGranted) {
+      print("ОШИБКА: Вы не выдали приложению все необходимые разрешения!");
     }
 
-    // 3. Используем встроенные методы библиотеки для уверенности
-    bool hasLocationPerm = await Nearby().checkLocationPermission();
-    if (!hasLocationPerm) {
-      await Nearby().askLocationPermission();
-    }
-
-    // Проверка разрешений для Bluetooth (только Android 12+)
-    bool hasBluetoothPerm = await Nearby().checkBluetoothPermission();
-    if (!hasBluetoothPerm) {
-      Nearby().askBluetoothPermission();
-    }
-
-    return allGranted && locationEnabled;
+    return allGranted;
   }
 
   // --- 1. НАЧАТЬ РАЗДАЧУ ---
