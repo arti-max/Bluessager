@@ -20,7 +20,6 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  // Шторка прикрепления файлов
   void _showAttachmentMenu() {
     showModalBottomSheet(
       context: context,
@@ -31,17 +30,26 @@ class _ChatScreenState extends State<ChatScreen> {
             ListTile(
               leading: const Icon(Icons.image, color: Colors.blue),
               title: const Text('Фото и Видео'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открывается галерея...')));
+              },
             ),
             ListTile(
               leading: const Icon(Icons.insert_drive_file, color: Colors.orange),
               title: const Text('Файл (до 1 ГБ)'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открывается проводник...')));
+              },
             ),
             ListTile(
               leading: const Icon(Icons.mic, color: Colors.green),
               title: const Text('Голосовое сообщение'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Запись голоса...')));
+              },
             ),
           ],
         ),
@@ -82,7 +90,7 @@ class _ChatScreenState extends State<ChatScreen> {
               children: [
                 IconButton(
                   icon: const Icon(Icons.attach_file), 
-                  onPressed: _showAttachmentMenu, // Привязали функцию
+                  onPressed: _showAttachmentMenu,
                 ),
                 Expanded(
                   child: TextField(
