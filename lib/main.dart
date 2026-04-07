@@ -1,12 +1,34 @@
 import 'package:flutter/material.dart';
 import 'screens/chat_list.dart';
+import 'logic/mesh_service.dart';
 
 void main() {
   runApp(const MeshMessengerApp());
 }
 
-class MeshMessengerApp extends StatelessWidget {
+class MeshMessengerApp extends StatefulWidget {
   const MeshMessengerApp({super.key});
+
+  @override
+  State<MeshMessengerApp> createState() => _MeshMessengerAppState();
+}
+
+class _MeshMessengerAppState extends State<MeshMessengerApp> {
+  @override
+  void initState() {
+    super.initState();
+    // При запуске приложения сразу включаем раздачу себя (маяк)
+    _startBackgroundBeacon();
+  }
+
+  void _startBackgroundBeacon() async {
+    // Запрашиваем разрешения
+    bool hasPermissions = await meshService.requestPermissions();
+    if (hasPermissions) {
+      // Если разрешения дали, начинаем постоянно кричать в эфир
+      meshService.startAdvertising();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

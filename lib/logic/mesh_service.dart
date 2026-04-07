@@ -121,6 +121,17 @@ class MeshService {
       Uint8List.fromList(message.codeUnits)
     );
   }
+
+  void stopDiscoveryOnly() {
+    Nearby().stopDiscovery();
+    print("Поиск остановлен, но маяк продолжает работать");
+  }
+
+  void stopMesh() {
+    Nearby().stopAdvertising();
+    Nearby().stopDiscovery();
+    print("Mesh-сеть полностью остановлена");
+  }
 }
 
 final meshService = MeshService();

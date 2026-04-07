@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../logic/app_state.dart';
-import '../logic/mesh_service.dart'; // Подключаем наш движок P2P
+import '../logic/mesh_service.dart';
 import 'chat.dart';
 import 'profile.dart';
 
@@ -14,7 +14,6 @@ class ChatListScreen extends StatefulWidget {
 class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   
-  // Список реально найденных устройств рядом (вместо заглушек)
   List<Map<String, String>> _nearbyDevices = [];
   bool _isSearching = false;
 
@@ -25,11 +24,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
     _tabController.addListener(() {
       setState(() {});
     });
-
-    // Если включен режим шлюза в профиле, сразу начинаем раздачу себя (Advertising)
-    if (appState.isGatewayEnabled) {
-      meshService.startAdvertising();
-    }
   }
 
   @override
@@ -38,22 +32,24 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
     super.dispose();
   }
 
-  // --- ЛОГИКА P2P (Радар) ---
+  // --- ЛОГИКА P2P (ТОЛЬКО ПОИСК) ---
   void _toggleSearch() async {
     if (_isSearching) {
-      // TODO: Добавить остановку поиска в MeshService
-      setState(() => _isSearching = false);
+      // Останавливаем ТОЛЬКО поиск (не трогаем раздачу, она работает всегда)
+      meshService.stopDiscoveryOnly(); // Сейчас мы добавим этот метод в mesh_service
+      setState(() {
+        _isSearching = false;
+        _nearbyDevices.clear(); 
+      });
       return;
     }
 
     setState(() => _isSearching = true);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Запрос разрешений и запуск радара...')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Поиск устройств вокруг...')));
 
-    // Запускаем реальный поиск устройств!
+    // Начинаем искать других
     await meshService.startDiscovery((endpointId, endpointName) {
-      // Эта функция вызовется, когда телефон найдет кого-то рядом
       setState(() {
-        // Проверяем, нет ли уже этого устройства в списке
         if (!_nearbyDevices.any((d) => d['id'] == endpointId)) {
           _nearbyDevices.add({
             'id': endpointId,
@@ -61,16 +57,13 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
           });
         }
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Найден: $endpointName')));
     });
   }
 
-  // Подключение к найденному устройству
   void _connectToPeer(String endpointId, String peerName) async {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Подключение к $peerName...')));
     await meshService.connectToDevice(endpointId);
     
-    // Переходим в чат (в будущем переход должен происходить только после успешного статуса CONNECTED)
     if (!mounted) return;
     Navigator.push(
       context,
@@ -78,7 +71,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
     );
   }
 
-  // --- ДИАЛОГИ (Без изменений) ---
   void _showAddFriendDialog() {
     final TextEditingController uidController = TextEditingController();
     showDialog(
@@ -140,11 +132,7 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
           IconButton(
             icon: const Icon(Icons.account_circle),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()))
-                .then((_) {
-                  // Если после изменения профиля включили шлюз — начинаем раздачу
-                  if (appState.isGatewayEnabled) meshService.startAdvertising();
-                  setState(() {});
-                }),
+                .then((_) => setState(() {})),
           ),
         ],
         bottom: TabBar(
@@ -159,7 +147,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
       body: TabBarView(
         controller: _tabController,
         children: [
-          // Вкладка 1: Реальный Радар
           _nearbyDevices.isEmpty
               ? Center(
                   child: Column(
@@ -187,7 +174,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
                   },
                 ),
           
-          // Вкладка 2: Друзья
           ListView.builder(
             itemCount: appState.friends.length,
             itemBuilder: (context, index) {
@@ -202,7 +188,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
             },
           ),
 
-          // Вкладка 3: Группы
           ListView.builder(
             itemCount: appState.groups.length,
             itemBuilder: (context, index) => ListTile(
@@ -215,11 +200,10 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
         ],
       ),
       
-      // Умная кнопка
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           if (_tabController.index == 0) {
-            _toggleSearch(); // Вызов реального поиска!
+            _toggleSearch();
           } else if (_tabController.index == 1) {
             _showAddFriendDialog();
           } else if (_tabController.index == 2) {

@@ -26,12 +26,27 @@ jobs:
       - name: Generate Android project
         run: flutter create .
         
-      - name: Configure Gradle Memory
+      # 1. ВКЛЮЧАЕМ GRADLE КЭШ (Значительно ускорит повторные сборки)
+      - name: Cache Gradle packages and build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+            
+      - name: Configure Gradle Memory & Cache
         run: |
           mkdir -p android
-          echo "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" > android/gradle.properties
+          # Добавили флаг org.gradle.caching=true для ускорения сборки
+          echo "org.gradle.jvmargs=-Xmx1024m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8" > android/gradle.properties
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
+          echo "org.gradle.parallel=false" >> android/gradle.properties
+          echo "org.gradle.vfs.watch=false" >> android/gradle.properties
+          echo "org.gradle.caching=true" >> android/gradle.properties
         
       - name: Add Android Permissions
         run: |
@@ -47,7 +62,8 @@ jobs:
           
       - run: flutter pub get
       
-      - run: flutter build apk --release
+      # 2. СБОРКА APK
+      - run: flutter build apk --release --no-shrink
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
