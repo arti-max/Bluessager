@@ -10,20 +10,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      # 1. Настройка Java с кэшированием библиотек Android (Gradle)
+      # 1. Настройка Java (пока без кеша gradle, так как папки android еще нет)
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
       
-      # 2. Настройка Flutter с кэшированием самого SDK
+      # 2. Настройка Flutter
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
           
-      # 3. Кэширование скачанных библиотек Dart
+      # 3. САМОЕ ГЛАВНОЕ: Генерируем папку android и нужные файлы в облаке
+      - name: Generate Android project
+        run: flutter create .
+          
+      # 4. Кеширование библиотек
       - name: Cache pub dependencies
         uses: actions/cache@v4
         with:
