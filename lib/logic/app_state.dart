@@ -20,10 +20,10 @@ class AppState {
   int totalBytesRelayed = 0;
 
   String get rank {
-    if (xp < 100)   return '🌱 Новичок';
-    if (xp < 500)   return '📡 Ретранслятор';
-    if (xp < 2000)  return '🔗 Узловой';
-    if (xp < 10000) return '🌐 Сетевик';
+    if (xp < 100)   return 'Новичок';
+    if (xp < 500)   return 'Ретранслятор';
+    if (xp < 2000)  return 'Узловой';
+    if (xp < 10000) return 'Сетевик';
     return '⚡ Легенда Сети';
   }
 

@@ -7,8 +7,9 @@ import '../models/chat_message.dart';
 class ChatScreen extends StatefulWidget {
   final String peerUid;
   final String peerName;
+  final bool isGroup;
 
-  const ChatScreen({super.key, required this.peerUid, required this.peerName});
+  const ChatScreen({super.key, required this.peerUid, required this.peerName, this.isGroup = false,});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -36,6 +37,15 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     _connSub = appState.connectionStream.listen((_) {
+      if (mounted) setState(() {
+        _isConnected = appState.isPeerConnected(widget.peerUid);
+      });
+      // После переподключения — обновляем статусы pending сообщений
+      _refreshMessageStatuses();
+    });
+
+    // Ловим события, которые могли прилететь ДО подписки
+    Future.microtask(() {
       if (mounted) setState(() => _isConnected = appState.isPeerConnected(widget.peerUid));
     });
 
@@ -55,17 +65,6 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
-    final endpointId = appState.getEndpointForPeer(widget.peerUid);
-
-    if (endpointId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Собеседник офлайн — сообщение будет отправлено при встрече в сети'),
-        backgroundColor: Colors.orange,
-      ));
-      // TODO v2: очередь store-and-forward
-      return;
-    }
-
     final msg = ChatMessage(
       id: '${DateTime.now().millisecondsSinceEpoch}',
       senderUid: appState.uid,
@@ -76,12 +75,39 @@ class _ChatScreenState extends State<ChatScreen> {
       status: MessageStatus.pending,
     );
 
-    final ok = meshService.sendMessage(endpointId, text);
-    msg.status = ok ? MessageStatus.delivered : MessageStatus.pending;
+    if (!widget.isGroup) {
+      // Личный чат
+      final endpointId = appState.getEndpointForPeer(widget.peerUid);
+      if (endpointId != null) {
+        final ok = meshService.sendMessage(endpointId, text);
+        msg.status = ok ? MessageStatus.delivered : MessageStatus.pending;
+      }
+      // Офлайн — просто pending, сообщение уходит в историю без return
+    } else {
+      // Группа — рассылаем всем подключённым прямо сейчас
+      bool anySent = false;
+      for (final endpointId in appState.connectedEndpoints.keys) {
+        if (meshService.sendMessage(endpointId, text)) anySent = true;
+      }
+      msg.status = anySent ? MessageStatus.delivered : MessageStatus.pending;
+    }
 
     appState.addMessage(widget.peerUid, msg);
-    if (mounted) setState(() { _messages.add(msg); _controller.clear(); });
+    if (mounted) {
+      setState(() {
+        _messages.add(msg);
+        _controller.clear();
+      });
+    }
     _scrollToBottom();
+  }
+
+  // Добавить этот метод (вызывается из _connSub)
+  void _refreshMessageStatuses() {
+    if (!mounted) return;
+    setState(() {
+      _messages = List.from(appState.getHistory(widget.peerUid));
+    });
   }
 
   void _scrollToBottom() {

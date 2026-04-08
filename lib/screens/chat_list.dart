@@ -353,7 +353,7 @@ class _ChatListScreenState extends State<ChatListScreen>
                       Text(
                         _isSearching
                             ? 'Сканируем эфир...'
-                            : 'Нажмите 📡 чтобы найти устройства рядом',
+                            : 'Нажмите кнопку чтобы найти устройства рядом',
                         style: const TextStyle(color: Colors.grey),
                         textAlign: TextAlign.center,
                       ),
@@ -459,6 +459,7 @@ class _ChatListScreenState extends State<ChatListScreen>
                           MaterialPageRoute(builder: (_) => ChatScreen(
                             peerUid: g['id'] ?? g['name'],
                             peerName: g['name'],
+                            isGroup: true,
                           )),
                         ),
                       ),
