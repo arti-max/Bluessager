@@ -106,7 +106,7 @@ class MeshService {
         onEndpointFound: (String? endpointId, String? endpointName, String? serviceId) {
           if (endpointId == null || endpointName == null) return;
           print("Найден: $endpointName ($endpointId)");
-          onDeviceFound(endpointId, endpointName);
+          onDeviceFound(endpointId, endpointId, endpointName);
         },
         onEndpointLost: (String? endpointId) {
           print("Потерян: $endpointId");
