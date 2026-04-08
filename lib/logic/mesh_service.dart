@@ -92,7 +92,7 @@ class MeshService {
   }
 
   // --- 2. ИСКАТЬ ДРУГИХ ---
-  Future<bool> startDiscovery(Function(String, String) onDeviceFound) async {
+  Future<bool> startDiscovery(void Function(String, String, String) onDeviceFound,) async {
     bool hasPermissions = await requestPermissions();
     if (!hasPermissions) {
       print("Нет прав для старта поиска");
@@ -145,8 +145,14 @@ class MeshService {
     }
   }
 
-  void sendMessage(String endpointId, String message) {
-    Nearby().sendBytesPayload(endpointId, Uint8List.fromList(message.codeUnits));
+  bool sendMessage(String endpointId, String message) {
+    try {
+      Nearby().sendBytesPayload(endpointId, Uint8List.fromList(message.codeUnits));
+      return true;
+    } catch (e) {
+      print("Ошибка отправки: $e");
+      return false;
+    }
   }
 
   void stopDiscoveryOnly() {
