@@ -48,25 +48,22 @@ jobs:
       # ИСПРАВЛЕНИЕ: Добавлены maxSdkVersion и minSdkVersion для совместимости с Android 12
       - name: Add Android Permissions
         run: |
-          # 1. Сначала аккуратно добавляем пространство имен tools прямо внутрь тега <manifest>
           sed -i 's/<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android">/<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android" xmlns:tools="http:\/\/schemas.android.com\/tools">/g' android/app/src/main/AndroidManifest.xml
           
-          # 2. Создаем чистый список разрешений
           cat << 'EOF' > perms.txt
-              <!-- Старые права (до Android 11) -->
               <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
               <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-              
-              <!-- Локация (Критично для Android 12) -->
+              <!-- Android 12+ BLE права (критично!) -->
+              <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+              <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-              
-              <!-- Wi-Fi -->
               <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
               <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+              <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" tools:targetApi="tiramisu" />
           EOF
           
-          # 3. Вставляем их сразу после открытия тега <manifest>
           sed -i '/<manifest.*>/r perms.txt' android/app/src/main/AndroidManifest.xml
           
       - name: Cache pub dependencies

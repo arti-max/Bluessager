@@ -1,8 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../logic/app_state.dart';
+import '../logic/mesh_service.dart';
+import '../models/chat_message.dart';
 
 class ChatScreen extends StatefulWidget {
+  final String peerUid;
   final String peerName;
-  const ChatScreen({super.key, required this.peerName});
+
+  const ChatScreen({super.key, required this.peerUid, required this.peerName});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -10,46 +16,187 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
-  final List<String> _messages = ["Соединение установлено."];
+  final ScrollController _scrollController = ScrollController();
+  late List<ChatMessage> _messages;
+  StreamSubscription<ChatMessage>? _msgSub;
+  StreamSubscription<void>? _connSub;
+  bool _isConnected = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _messages = List.from(appState.getHistory(widget.peerUid));
+    _isConnected = appState.isPeerConnected(widget.peerUid);
+
+    _msgSub = appState.messageStream.listen((msg) {
+      if (msg.peerUid == widget.peerUid && !msg.isMe) {
+        if (mounted) setState(() => _messages.add(msg));
+        _scrollToBottom();
+      }
+    });
+
+    _connSub = appState.connectionStream.listen((_) {
+      if (mounted) setState(() => _isConnected = appState.isPeerConnected(widget.peerUid));
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+  }
+
+  @override
+  void dispose() {
+    _msgSub?.cancel();
+    _connSub?.cancel();
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   void _sendMessage() {
-    if (_controller.text.isEmpty) return;
-    setState(() {
-      _messages.add(_controller.text);
-      _controller.clear();
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+
+    final endpointId = appState.getEndpointForPeer(widget.peerUid);
+
+    if (endpointId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Собеседник офлайн — сообщение будет отправлено при встрече в сети'),
+        backgroundColor: Colors.orange,
+      ));
+      // TODO v2: очередь store-and-forward
+      return;
+    }
+
+    final msg = ChatMessage(
+      id: '${DateTime.now().millisecondsSinceEpoch}',
+      senderUid: appState.uid,
+      peerUid: widget.peerUid,
+      text: text,
+      timestamp: DateTime.now(),
+      isMe: true,
+      status: MessageStatus.pending,
+    );
+
+    final ok = meshService.sendMessage(endpointId, text);
+    msg.status = ok ? MessageStatus.delivered : MessageStatus.pending;
+
+    appState.addMessage(widget.peerUid, msg);
+    if (mounted) setState(() { _messages.add(msg); _controller.clear(); });
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
-  void _showAttachmentMenu() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => SafeArea(
-        child: Wrap(
+  String _formatTime(DateTime dt) =>
+      "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ListTile(
-              leading: const Icon(Icons.image, color: Colors.blue),
-              title: const Text('Фото и Видео'),
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открывается галерея...')));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.insert_drive_file, color: Colors.orange),
-              title: const Text('Файл (до 1 ГБ)'),
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открывается проводник...')));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.mic, color: Colors.green),
-              title: const Text('Голосовое сообщение'),
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Запись голоса...')));
-              },
+            Text(widget.peerName, style: const TextStyle(fontSize: 16)),
+            Row(children: [
+              Icon(
+                Icons.circle,
+                size: 8,
+                color: _isConnected ? Colors.greenAccent : Colors.grey,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                _isConnected ? 'Онлайн' : 'Офлайн',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _isConnected ? Colors.greenAccent : Colors.grey,
+                ),
+              ),
+            ]),
+          ],
+        ),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: _messages.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.lock_outline, size: 52, color: Colors.grey[700]),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Сообщения хранятся только\nна вашем устройстве',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    itemCount: _messages.length,
+                    itemBuilder: (ctx, i) => _buildBubble(_messages[i]),
+                  ),
+          ),
+          _buildInput(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBubble(ChatMessage msg) {
+    return Align(
+      alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+        decoration: BoxDecoration(
+          color: msg.isMe ? Colors.deepPurple[700] : Colors.grey[800],
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(msg.isMe ? 18 : 4),
+            bottomRight: Radius.circular(msg.isMe ? 4 : 18),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(msg.text, style: const TextStyle(fontSize: 15)),
+            const SizedBox(height: 3),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _formatTime(msg.timestamp),
+                  style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.55)),
+                ),
+                if (msg.isMe) ...[
+                  const SizedBox(width: 3),
+                  Icon(
+                    msg.status == MessageStatus.delivered ? Icons.done_all : Icons.done,
+                    size: 13,
+                    color: msg.status == MessageStatus.delivered
+                        ? Colors.greenAccent
+                        : Colors.white38,
+                  ),
+                ],
+              ],
             ),
           ],
         ),
@@ -57,58 +204,39 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.peerName)),
-      body: Column(
+  Widget _buildInput() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Colors.white12)),
+      ),
+      child: Row(
         children: [
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(8),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                bool isMe = index > 0; 
-                return Align(
-                  alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isMe ? Colors.deepPurple : Colors.grey[800],
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Text(_messages[index], style: const TextStyle(fontSize: 16)),
-                  ),
-                );
-              },
+          IconButton(
+            icon: const Icon(Icons.attach_file, color: Colors.grey),
+            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Файлы через Wi-Fi Direct — скоро')),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.attach_file), 
-                  onPressed: _showAttachmentMenu,
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              maxLines: null,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _sendMessage(),
+              decoration: const InputDecoration(
+                hintText: 'Сообщение...',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(24)),
                 ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    decoration: const InputDecoration(
-                      hintText: 'Сообщение...',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(20))),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.send, color: Colors.deepPurpleAccent),
-                  onPressed: _sendMessage,
-                ),
-              ],
+                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              ),
             ),
-          )
+          ),
+          IconButton(
+            icon: const Icon(Icons.send, color: Colors.deepPurpleAccent),
+            onPressed: _sendMessage,
+          ),
         ],
       ),
     );
