@@ -151,14 +151,10 @@ class MeshService {
         });
       });
 
-    } else if (status == Status.ALREADY_CONNECTED_TO_ENDPOINT) {
-      // Не ошибка — просто уже подключены (гонка двух requestConnection)
-      _pendingNames.remove(endpointId);
-      print("ℹ️ Уже подключены к $endpointId");
-
     } else {
+      // REJECTED, ERROR, или любой другой статус — включая "уже подключён"
       _pendingNames.remove(endpointId);
-      print("❌ Не подключились: $status");
+      print("⚠️ Не подключились ($status) к $endpointId — возможно уже connected");
     }
   }
 
