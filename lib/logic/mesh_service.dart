@@ -18,17 +18,17 @@ class MeshService {
   bool _isDiscovering = false;
 
   Timer? _pingTimer;
-  Timer? _friendScanTimer;
+  Timer? _meshHealthTimer; // единый таймер вместо двух
 
   void Function(String, String, String)? _onDeviceFoundCallback;
 
-  // Храним имена пиров ДО подтверждения соединения
-  // endpointId -> displayName из ConnectionInfo
   final Map<String, String> _pendingNames = {};
+
+  // UID пиров которым МЫ делали requestConnection (чтобы не дублировать)
+  final Set<String> _outgoingRequests = {};
 
   // --- РАЗРЕШЕНИЯ ---
   Future<bool> requestPermissions() async {
-    // Запрашиваем по одному — групповой запрос на Android 12 иногда глючит
     final loc = await Permission.locationWhenInUse.request();
     if (!loc.isGranted) {
       print("❌ Локация не выдана");
@@ -39,8 +39,6 @@ class MeshService {
     final btConnect   = await Permission.bluetoothConnect.request();
     final btAdvertise = await Permission.bluetoothAdvertise.request();
     final btClassic   = await Permission.bluetooth.request();
-
-    // nearbyWifiDevices некритично — не блокируем если нет
     await Permission.nearbyWifiDevices.request();
 
     final hasNew = btScan.isGranted && btConnect.isGranted && btAdvertise.isGranted;
@@ -50,12 +48,11 @@ class MeshService {
       print("❌ Bluetooth права не выданы. New=$hasNew Old=$hasOld");
       return false;
     }
-
     print("✅ Права: New=$hasNew Old=$hasOld");
     return true;
   }
 
-  // --- ПАРСИНГ ВХОДЯЩИХ ПАКЕТОВ ---
+  // --- ПАРСИНГ ПАКЕТОВ ---
   void _handlePayload(String endpointId, Payload payload) {
     if (payload.type != PayloadType.BYTES || payload.bytes == null) return;
 
@@ -88,7 +85,6 @@ class MeshService {
         });
         final senderUid = data['uid'] as String?;
         if (senderUid != null) {
-          // Обновляем реальный UID пира (до этого был endpointId)
           appState.connectedEndpoints[endpointId] = senderUid;
           appState.peerNames[senderUid] = data['name'] as String? ?? senderUid;
           appState.peerLastSeen[senderUid] = DateTime.now();
@@ -106,7 +102,7 @@ class MeshService {
       }
 
     } catch (e) {
-      print("Ошибка парсинга пакета: $e");
+      print("Ошибка парсинга: $e");
     }
   }
 
@@ -126,15 +122,11 @@ class MeshService {
 
   // --- ОБРАБОТЧИКИ СОЕДИНЕНИЯ ---
 
-  // Шаг 1: Инициация — только принимаем и запоминаем имя
   void _onConnectionInitiated(String? endpointId, ConnectionInfo info) {
     if (endpointId == null) return;
     print("🤝 Инициация от ${info.endpointName} ($endpointId)");
-
-    // Запоминаем имя — оно доступно только здесь
     _pendingNames[endpointId] = info.endpointName;
 
-    // Принимаем соединение
     Nearby().acceptConnection(
       endpointId,
       onPayLoadRecieved: _handlePayload,
@@ -142,17 +134,15 @@ class MeshService {
     );
   }
 
-  // Шаг 2: Результат — здесь соединение реально установлено или упало
   void _onConnectionResult(String? endpointId, Status status) {
     if (endpointId == null) return;
     print("📶 Результат $endpointId: $status");
+    _outgoingRequests.remove(endpointId);
 
     if (status == Status.CONNECTED) {
       final displayName = _pendingNames.remove(endpointId) ?? endpointId;
-      // Регистрируем под endpointId — реальный UID придёт через ping
       appState.onPeerConnected(endpointId, endpointId, displayName);
 
-      // Шлём ping через 300мс чтобы обменяться реальными UID
       Future.delayed(const Duration(milliseconds: 300), () {
         _sendPacket(endpointId, {
           'type': 'ping',
@@ -160,10 +150,15 @@ class MeshService {
           'name': appState.name.isNotEmpty ? appState.name : appState.uid,
         });
       });
-    } else {
-      // Ошибка или отказ
+
+    } else if (status == Status.ALREADY_CONNECTED_TO_ENDPOINT) {
+      // Не ошибка — просто уже подключены (гонка двух requestConnection)
       _pendingNames.remove(endpointId);
-      print("❌ Соединение не установлено: $status");
+      print("ℹ️ Уже подключены к $endpointId");
+
+    } else {
+      _pendingNames.remove(endpointId);
+      print("❌ Не подключились: $status");
     }
   }
 
@@ -171,69 +166,62 @@ class MeshService {
     if (endpointId == null) return;
     print("🔌 Отключён: $endpointId");
     _pendingNames.remove(endpointId);
+    _outgoingRequests.remove(endpointId);
     appState.onPeerDisconnected(endpointId);
   }
 
-  // --- ПИНГ-ТАЙМЕР ---
-  void _startPingTimer() {
-    _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      final endpoints = List<String>.from(appState.connectedEndpoints.keys);
-      for (final endpointId in endpoints) {
-        _sendPacket(endpointId, {
-          'type': 'ping',
-          'uid': appState.uid,
-          'name': appState.name.isNotEmpty ? appState.name : appState.uid,
-        });
-      }
+  // --- АВТО-КОННЕКТ (с защитой от гонки) ---
+  Future<void> _autoConnect(String endpointId, String remoteEndpointName) async {
+    // Уже подключены
+    if (appState.connectedEndpoints.containsKey(endpointId)) return;
+    // Уже в процессе рукопожатия
+    if (_pendingNames.containsKey(endpointId)) return;
+    // Уже отправили запрос
+    if (_outgoingRequests.contains(endpointId)) return;
 
-      // Чистим мёртвых (нет pong > 45 сек)
-      final now = DateTime.now();
-      final dead = appState.peerLastSeen.entries
-          .where((e) => now.difference(e.value).inSeconds > 45)
-          .map((e) => e.key)
-          .toList();
-      for (final uid in dead) {
-        appState.markPeerOfflineByUid(uid);
-      }
-    });
+    // ЗАЩИТА ОТ ГОНКИ: коннектится только тот, чьё имя лексически МЕНЬШЕ
+    // Второй получит onConnectionInitiated от первого и просто примет
+    final myName = appState.name.isNotEmpty ? appState.name : appState.uid;
+    if (myName.compareTo(remoteEndpointName) >= 0) {
+      print("⏳ Ждём входящего коннекта от $remoteEndpointName (их имя меньше)");
+      return;
+    }
+
+    print("📞 Коннектимся к $remoteEndpointName ($endpointId)");
+    _outgoingRequests.add(endpointId);
+
+    try {
+      await Nearby().requestConnection(
+        myName,
+        endpointId,
+        onConnectionInitiated: _onConnectionInitiated,
+        onConnectionResult: _onConnectionResult,
+        onDisconnected: _onDisconnected,
+      );
+    } catch (e) {
+      print("Авто-коннект $endpointId: $e");
+      _outgoingRequests.remove(endpointId);
+    }
   }
 
-  // --- ТАЙМЕР ПЕРЕСКАНИРОВАНИЯ ---
-  void _startFriendScanTimer() {
-    _friendScanTimer?.cancel();
-    _friendScanTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      if (!_isDiscovering) {
-        print("🔄 Перезапуск discovery...");
-        await _startDiscoveryInternal();
-      }
-    });
-  }
-
-  // --- СТАРТ ВСЕГО УЗЛА ---
+  // --- СТАРТ УЗЛА ---
   Future<void> startMeshNode() async {
     if (!await requestPermissions()) {
       print("❌ Mesh не запущен — нет прав");
       return;
     }
 
-    await startAdvertising();
-
-    // Задержка критична: Nearby падает если advertising и discovery стартуют одновременно
+    await _doStartAdvertising();
     await Future.delayed(const Duration(milliseconds: 800));
+    await _doStartDiscovery();
 
-    await _startDiscoveryInternal();
-
-    _startPingTimer();
-    _startFriendScanTimer();
-
+    _startTimers();
     print("✅ Mesh-узел запущен");
   }
 
   // --- РАЗДАЧА ---
-  Future<bool> startAdvertising() async {
+  Future<bool> _doStartAdvertising() async {
     if (_isAdvertising) return true;
-
     try {
       _isAdvertising = await Nearby().startAdvertising(
         appState.name.isNotEmpty ? appState.name : appState.uid,
@@ -252,9 +240,18 @@ class MeshService {
     }
   }
 
-  // --- ПОИСК ВНУТРЕННИЙ (фон) ---
-  Future<bool> _startDiscoveryInternal() async {
-    if (_isDiscovering) return true;
+  Future<bool> startAdvertising() => _doStartAdvertising();
+
+  // --- ПОИСК ВНУТРЕННИЙ ---
+  Future<bool> _doStartDiscovery() async {
+    // Сначала останавливаем если был запущен — для чистого перезапуска
+    if (_isDiscovering) {
+      try {
+        Nearby().stopDiscovery();
+      } catch (_) {}
+      _isDiscovering = false;
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
 
     try {
       _isDiscovering = await Nearby().startDiscovery(
@@ -264,19 +261,14 @@ class MeshService {
           if (endpointId == null || endpointName == null) return;
           print("👁 Найден: $endpointName ($endpointId)");
 
-          // Уведомляем UI радара если активен
           _onDeviceFoundCallback?.call(endpointId, endpointId, endpointName);
-
-          // Авто-коннект если ещё не подключены и не в процессе
-          if (!appState.connectedEndpoints.containsKey(endpointId) &&
-              !_pendingNames.containsKey(endpointId)) {
-            _autoConnect(endpointId);
-          }
+          _autoConnect(endpointId, endpointName);
         },
         onEndpointLost: (endpointId) {
           if (endpointId != null) {
             print("💨 Потерян: $endpointId");
-            appState.onPeerDisconnected(endpointId);
+            // НЕ удаляем из connectedEndpoints — соединение может жить
+            // даже если endpoint вышел из зоны видимости при discovery
           }
         },
         serviceId: serviceId,
@@ -290,45 +282,84 @@ class MeshService {
     }
   }
 
-  // --- ПОИСК ДЛЯ UI РАДАРА ---
+  // --- ТАЙМЕРЫ ---
+  void _startTimers() {
+    _pingTimer?.cancel();
+    _meshHealthTimer?.cancel();
+
+    // Пинг каждые 15 сек
+    _pingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      final endpoints = List<String>.from(appState.connectedEndpoints.keys);
+      for (final ep in endpoints) {
+        _sendPacket(ep, {
+          'type': 'ping',
+          'uid': appState.uid,
+          'name': appState.name.isNotEmpty ? appState.name : appState.uid,
+        });
+      }
+
+      // Чистим мёртвых пиров (45 сек без pong)
+      final now = DateTime.now();
+      final dead = appState.peerLastSeen.entries
+          .where((e) => now.difference(e.value).inSeconds > 45)
+          .map((e) => e.key)
+          .toList();
+      for (final uid in dead) {
+        appState.markPeerOfflineByUid(uid);
+      }
+    });
+
+    // Health-check каждые 30 сек: перезапускаем advertising и discovery если упали
+    _meshHealthTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      print("🔄 Health-check...");
+
+      if (!_isAdvertising) {
+        print("🔄 Перезапуск advertising...");
+        await _doStartAdvertising();
+      }
+
+      // Discovery всегда перезапускаем — Android его тихо убивает
+      print("🔄 Перезапуск discovery...");
+      await _doStartDiscovery();
+    });
+  }
+
+  // --- UI РАДАР ---
   Future<bool> startDiscovery(
     void Function(String, String, String) onDeviceFound,
   ) async {
     if (!await requestPermissions()) return false;
-
     _onDeviceFoundCallback = onDeviceFound;
-
-    // Если уже ищем в фоне — просто добавили колбэк, возвращаем успех
     if (_isDiscovering) return true;
-
-    return _startDiscoveryInternal();
+    return _doStartDiscovery();
   }
 
   void stopDiscoveryOnly() {
-    // Убираем только UI колбэк — фоновый поиск остаётся
     _onDeviceFoundCallback = null;
+    // Фоновый поиск продолжается — не останавливаем
   }
 
-  // --- АВТО-КОННЕКТ ---
-  Future<void> _autoConnect(String endpointId) async {
+  // --- РУЧНОЕ ПОДКЛЮЧЕНИЕ ИЗ РАДАРА ---
+  Future<void> connectToDevice(String endpointId) async {
+    if (appState.connectedEndpoints.containsKey(endpointId)) return;
+    if (_pendingNames.containsKey(endpointId)) return;
+    if (_outgoingRequests.contains(endpointId)) return;
+
+    // При ручном подключении из радара — игнорируем правило "кто меньше"
+    _outgoingRequests.add(endpointId);
     try {
+      final myName = appState.name.isNotEmpty ? appState.name : appState.uid;
       await Nearby().requestConnection(
-        appState.name.isNotEmpty ? appState.name : appState.uid,
+        myName,
         endpointId,
         onConnectionInitiated: _onConnectionInitiated,
         onConnectionResult: _onConnectionResult,
         onDisconnected: _onDisconnected,
       );
     } catch (e) {
-      print("Авто-коннект $endpointId: $e");
+      print("Ручной коннект $endpointId: $e");
+      _outgoingRequests.remove(endpointId);
     }
-  }
-
-  // --- РУЧНОЕ ПОДКЛЮЧЕНИЕ ИЗ РАДАРА ---
-  Future<void> connectToDevice(String endpointId) async {
-    if (appState.connectedEndpoints.containsKey(endpointId)) return;
-    if (_pendingNames.containsKey(endpointId)) return; // уже в процессе
-    await _autoConnect(endpointId);
   }
 
   // --- ОТПРАВКА СООБЩЕНИЯ ---
@@ -344,12 +375,13 @@ class MeshService {
 
   void stopMesh() {
     _pingTimer?.cancel();
-    _friendScanTimer?.cancel();
-    Nearby().stopAdvertising();
-    Nearby().stopDiscovery();
+    _meshHealthTimer?.cancel();
+    try { Nearby().stopAdvertising(); } catch (_) {}
+    try { Nearby().stopDiscovery(); } catch (_) {}
     _isAdvertising = false;
     _isDiscovering = false;
     _pendingNames.clear();
+    _outgoingRequests.clear();
   }
 }
 

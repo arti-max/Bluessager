@@ -70,7 +70,23 @@ class _ChatListScreenState extends State<ChatListScreen>
   }
 
   void _connectToPeer(String endpointId, String peerUid, String peerName) async {
+    // Если уже подключены — сразу в чат
+    if (appState.isPeerConnected(peerUid)) {
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => ChatScreen(peerUid: peerUid, peerName: peerName),
+      ));
+      return;
+    }
+
     await meshService.connectToDevice(endpointId);
+
+    // Ждём подключения максимум 3 сек
+    for (int i = 0; i < 6; i++) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (appState.isPeerConnected(peerUid) ||
+          appState.connectedEndpoints.containsKey(endpointId)) break;
+    }
+
     if (!mounted) return;
     Navigator.push(context, MaterialPageRoute(
       builder: (_) => ChatScreen(peerUid: peerUid, peerName: peerName),
