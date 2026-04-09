@@ -7,7 +7,8 @@ class AppState {
   factory AppState() => _instance;
   AppState._internal();
 
-  String uid = "MESH-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}";
+  // НЕ генерируем здесь — генерируем только один раз в loadFromPrefs()
+  String uid = "";
   String name = "";
   bool isGatewayEnabled = false;
   bool isMaskingEnabled = false;
@@ -33,18 +34,13 @@ class AppState {
     return 99999;
   }
 
-  List<Map<String, dynamic>> friends = [
-    {"uid": "MESH-12345", "name": "Иван"},
-    {"uid": "MESH-67890", "name": ""},
-  ];
-  List<Map<String, dynamic>> groups = [
-    {"name": "Секретная группа", "members": 2, "id": "grp-001"},
-  ];
+  List<Map<String, dynamic>> friends = [];
+  List<Map<String, dynamic>> groups = [];
 
   final Map<String, List<ChatMessage>> messageHistory = {};
-  final Map<String, String> connectedEndpoints = {}; // endpointId -> uid
-  final Map<String, String> peerNames = {};           // uid -> displayName
-  final Map<String, DateTime> peerLastSeen = {};      // uid -> последний пинг (НОВОЕ)
+  final Map<String, String> connectedEndpoints = {};
+  final Map<String, String> peerNames = {};
+  final Map<String, DateTime> peerLastSeen = {};
 
   final _messageStreamCtrl = StreamController<ChatMessage>.broadcast();
   Stream<ChatMessage> get messageStream => _messageStreamCtrl.stream;
@@ -69,7 +65,7 @@ class AppState {
   void onPeerConnected(String endpointId, String peerUid, String peerDisplayName) {
     connectedEndpoints[endpointId] = peerUid;
     peerNames[peerUid] = peerDisplayName;
-    peerLastSeen[peerUid] = DateTime.now(); // (НОВОЕ)
+    peerLastSeen[peerUid] = DateTime.now();
     karma += 5;
     xp += 10;
     _connectionStreamCtrl.add(null);
@@ -81,18 +77,15 @@ class AppState {
     _connectionStreamCtrl.add(null);
   }
 
-  // НОВОЕ: снять онлайн-статус по UID (для пинг-таймаута)
   void markPeerOfflineByUid(String peerUid) {
     peerLastSeen.remove(peerUid);
     connectedEndpoints.removeWhere((_, v) => v == peerUid);
     _connectionStreamCtrl.add(null);
   }
 
-  // НОВОЕ: публичный триггер обновления UI
   void notifyConnectionChange() => _connectionStreamCtrl.add(null);
 
   bool isPeerConnected(String peerUid) {
-    // Считаем онлайн если: есть в connectedEndpoints ИЛИ видели пинг < 45 сек назад
     if (connectedEndpoints.values.contains(peerUid)) return true;
     final lastSeen = peerLastSeen[peerUid];
     if (lastSeen != null) {
@@ -113,13 +106,24 @@ class AppState {
 
   Future<void> loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    uid = prefs.getString('uid') ?? uid;
+
+    // UID: загружаем сохранённый или создаём ОДИН РАЗ и сохраняем навсегда
+    final savedUid = prefs.getString('uid');
+    if (savedUid != null && savedUid.isNotEmpty) {
+      uid = savedUid;
+    } else {
+      uid = "MESH-${DateTime.now().millisecondsSinceEpoch.toString().substring(4)}";
+      await prefs.setString('uid', uid); // сразу сохраняем
+    }
+
     name = prefs.getString('name') ?? '';
     karma = prefs.getInt('karma') ?? 0;
     xp = prefs.getInt('xp') ?? 0;
     totalBytesSent = prefs.getInt('totalBytesSent') ?? 0;
     isGatewayEnabled = prefs.getBool('isGatewayEnabled') ?? false;
     isMaskingEnabled = prefs.getBool('isMaskingEnabled') ?? false;
+
+    print("✅ UID загружен: $uid");
   }
 
   Future<void> saveProfile() async {

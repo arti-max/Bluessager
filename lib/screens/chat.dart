@@ -76,15 +76,24 @@ class _ChatScreenState extends State<ChatScreen> {
     );
 
     if (!widget.isGroup) {
-      // Личный чат
-      final endpointId = appState.getEndpointForPeer(widget.peerUid);
+      // Ищем endpointId по реальному UID пира
+      String? endpointId = appState.getEndpointForPeer(widget.peerUid);
+
       if (endpointId != null) {
         final ok = meshService.sendMessage(endpointId, text);
         msg.status = ok ? MessageStatus.delivered : MessageStatus.pending;
+      } else {
+        // Пир ещё не прислал ping — ищем по displayName как запасной вариант
+        final fallback = appState.connectedEndpoints.entries
+            .where((e) => appState.peerNames[e.value] == widget.peerName)
+            .firstOrNull;
+        if (fallback != null) {
+          final ok = meshService.sendMessage(fallback.key, text);
+          msg.status = ok ? MessageStatus.delivered : MessageStatus.pending;
+        }
+        // Если не нашли — остаётся pending, уйдёт когда подключится
       }
-      // Офлайн — просто pending, сообщение уходит в историю без return
     } else {
-      // Группа — рассылаем всем подключённым прямо сейчас
       bool anySent = false;
       for (final endpointId in appState.connectedEndpoints.keys) {
         if (meshService.sendMessage(endpointId, text)) anySent = true;

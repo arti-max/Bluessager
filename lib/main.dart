@@ -5,7 +5,7 @@ import 'logic/app_state.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await appState.loadFromPrefs(); // Загружаем UID, имя, карму из хранилища
+  await appState.loadFromPrefs();
   runApp(const MeshMessengerApp());
 }
 
