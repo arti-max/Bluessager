@@ -39,7 +39,7 @@ class _ChatListScreenState extends State<ChatListScreen>
   // --- Радар ---
   void _toggleSearch() async {
     if (_isSearching) {
-      meshService.stopDiscoveryOnly();
+      meshService.stopDiscoveryOnly(); // теперь только убирает UI колбэк
       setState(() { _isSearching = false; _nearbyDevices.clear(); });
       return;
     }

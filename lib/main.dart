@@ -25,7 +25,7 @@ class _MeshMessengerAppState extends State<MeshMessengerApp> {
 
   void _startBackgroundBeacon() async {
     final ok = await meshService.requestPermissions();
-    if (ok) meshService.startAdvertising();
+    if (ok) meshService.startMeshNode(); // БЫЛО: startAdvertising()
   }
 
   @override

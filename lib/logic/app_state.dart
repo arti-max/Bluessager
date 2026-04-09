@@ -7,13 +7,11 @@ class AppState {
   factory AppState() => _instance;
   AppState._internal();
 
-  // --- Профиль ---
   String uid = "MESH-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}";
   String name = "";
   bool isGatewayEnabled = false;
   bool isMaskingEnabled = false;
 
-  // --- Система кармы и опыта ---
   int karma = 0;
   int xp = 0;
   int totalBytesSent = 0;
@@ -24,7 +22,7 @@ class AppState {
     if (xp < 500)   return 'Ретранслятор';
     if (xp < 2000)  return 'Узловой';
     if (xp < 10000) return 'Сетевик';
-    return '⚡ Легенда Сети';
+    return 'Легенда Сети';
   }
 
   int get xpToNextLevel {
@@ -35,7 +33,6 @@ class AppState {
     return 99999;
   }
 
-  // --- Социальные данные ---
   List<Map<String, dynamic>> friends = [
     {"uid": "MESH-12345", "name": "Иван"},
     {"uid": "MESH-67890", "name": ""},
@@ -44,21 +41,17 @@ class AppState {
     {"name": "Секретная группа", "members": 2, "id": "grp-001"},
   ];
 
-  // --- История сообщений: ключ = UID собеседника ---
   final Map<String, List<ChatMessage>> messageHistory = {};
+  final Map<String, String> connectedEndpoints = {}; // endpointId -> uid
+  final Map<String, String> peerNames = {};           // uid -> displayName
+  final Map<String, DateTime> peerLastSeen = {};      // uid -> последний пинг (НОВОЕ)
 
-  // --- Активные подключения: endpointId -> uid ---
-  final Map<String, String> connectedEndpoints = {};
-  final Map<String, String> peerNames = {}; // uid -> displayName
-
-  // --- Стримы для UI ---
   final _messageStreamCtrl = StreamController<ChatMessage>.broadcast();
   Stream<ChatMessage> get messageStream => _messageStreamCtrl.stream;
 
   final _connectionStreamCtrl = StreamController<void>.broadcast();
   Stream<void> get connectionStream => _connectionStreamCtrl.stream;
 
-  // --- Методы ---
   void addMessage(String peerUid, ChatMessage message) {
     messageHistory[peerUid] ??= [];
     messageHistory[peerUid]!.add(message);
@@ -76,6 +69,7 @@ class AppState {
   void onPeerConnected(String endpointId, String peerUid, String peerDisplayName) {
     connectedEndpoints[endpointId] = peerUid;
     peerNames[peerUid] = peerDisplayName;
+    peerLastSeen[peerUid] = DateTime.now(); // (НОВОЕ)
     karma += 5;
     xp += 10;
     _connectionStreamCtrl.add(null);
@@ -87,8 +81,25 @@ class AppState {
     _connectionStreamCtrl.add(null);
   }
 
-  bool isPeerConnected(String peerUid) =>
-      connectedEndpoints.values.contains(peerUid);
+  // НОВОЕ: снять онлайн-статус по UID (для пинг-таймаута)
+  void markPeerOfflineByUid(String peerUid) {
+    peerLastSeen.remove(peerUid);
+    connectedEndpoints.removeWhere((_, v) => v == peerUid);
+    _connectionStreamCtrl.add(null);
+  }
+
+  // НОВОЕ: публичный триггер обновления UI
+  void notifyConnectionChange() => _connectionStreamCtrl.add(null);
+
+  bool isPeerConnected(String peerUid) {
+    // Считаем онлайн если: есть в connectedEndpoints ИЛИ видели пинг < 45 сек назад
+    if (connectedEndpoints.values.contains(peerUid)) return true;
+    final lastSeen = peerLastSeen[peerUid];
+    if (lastSeen != null) {
+      return DateTime.now().difference(lastSeen).inSeconds < 45;
+    }
+    return false;
+  }
 
   String? getEndpointForPeer(String peerUid) {
     for (final entry in connectedEndpoints.entries) {
@@ -100,7 +111,6 @@ class AppState {
   List<ChatMessage> getHistory(String peerUid) =>
       messageHistory[peerUid] ?? [];
 
-  // --- Persistence (SharedPreferences) ---
   Future<void> loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     uid = prefs.getString('uid') ?? uid;
